@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Course } from '../data/courses';
+import { Course, CAREERS } from '../data/courses';
 import YearBlock from '../components/YearBlock';
 import Settings from '../components/Settings';
 import RecommendationEngine from '../components/RecommendationEngine';
@@ -33,6 +33,8 @@ export default function Home() {
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [currentUserCareerId, setCurrentUserCareerId] = useState<string | undefined>(undefined);
+  const [regCareerId, setRegCareerId] = useState<string>('isc');
   const isCurrentUserNew = false; // El estado de nuevo usuario ahora viene de la API en el login
 
   const { 
@@ -46,7 +48,7 @@ export default function Home() {
     startEmpty: isCurrentUserNew,
   });
 
-  const { years } = useCourseCatalog();
+  const { years } = useCourseCatalog(currentUserCareerId);
 
   // Estados para nuevo usuario y dashboard
   const [selectedCourses, setSelectedCourses] = useState<Set<string>>(new Set());
@@ -122,6 +124,7 @@ export default function Home() {
         console.log('[LOGIN] Usuario autenticado:', user);
         
         setCurrentUser(user.id);
+        setCurrentUserCareerId(user.careerId);
         setLoginError('');
         setSelectedCourses(new Set());
         setCourseSearch('');
@@ -160,7 +163,7 @@ export default function Home() {
       const response = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'register', userId: userTrimmed, password })
+        body: JSON.stringify({ action: 'register', userId: userTrimmed, password, careerId: regCareerId })
       });
 
       if (response.ok) {
@@ -182,6 +185,7 @@ export default function Home() {
     setPassword('');
     setLoginError('');
     setCurrentUser(null);
+    setCurrentUserCareerId(undefined);
     setSelectedCourses(new Set());
   };
 
@@ -261,7 +265,16 @@ export default function Home() {
       }
 
       const coursesForPeriod = availableCourses.slice(0, coursesPerPeriod);
-      const periodLabel = `${periodNames[currentPlanPeriod - 1]} ${currentPlanYear}`;
+      const hasPPSInPeriod = coursesForPeriod.some(c => c.code === 'PPS');
+      
+      let pName = periodNames[currentPlanPeriod - 1];
+      if (hasPPSInPeriod) {
+        if (currentPlanPeriod === 1) pName = 'P1 (Enero-Mayo)';
+        else if (currentPlanPeriod === 2) pName = 'P2 (Mayo-Septiembre)';
+        else if (currentPlanPeriod === 3) pName = 'P3 (Septiembre-Enero)';
+      }
+
+      const periodLabel = `${pName} ${currentPlanYear}`;
       plan.push({ period: periodLabel, courses: coursesForPeriod });
 
       // Marcar las clases recién seleccionadas como aprobadas para el siguiente período
@@ -284,10 +297,25 @@ export default function Home() {
     // Calcular finalización basada en el plan
     if (plan.length > 0) {
       const lastPeriod = plan[plan.length - 1];
+      const hasPPS = plan.some(p => p.courses.some(c => c.code === 'PPS'));
+      
       const yearMatch = lastPeriod.period.match(/(\d{4})$/);
-      const finalYear = yearMatch ? parseInt(yearMatch[1]) : currentYearCalendario;
+      let finalYear = yearMatch ? parseInt(yearMatch[1]) : currentYearCalendario;
+      let finalPeriodLabel = lastPeriod.period.split(' ')[0] + ' ' + lastPeriod.period.split(' ')[1];
+
+      if (hasPPS && lastPeriod.courses.some(c => c.code === 'PPS')) {
+        if (lastPeriod.period.startsWith('P1')) {
+          finalPeriodLabel = 'Mayo';
+        } else if (lastPeriod.period.startsWith('P2')) {
+          finalPeriodLabel = 'Septiembre';
+        } else if (lastPeriod.period.startsWith('P3')) {
+          finalPeriodLabel = 'Enero';
+          finalYear += 1;
+        }
+      }
+
       setCompletionYear(finalYear);
-      setCompletionPeriod(lastPeriod.period.split(' ')[0] + ' ' + lastPeriod.period.split(' ')[1]);
+      setCompletionPeriod(finalPeriodLabel);
     } else {
       setCompletionYear(currentYearCalendario);
       setCompletionPeriod(periodNames[currentPeriod - 1]);
@@ -298,7 +326,7 @@ export default function Home() {
     if (appState === 'dashboard') {
       suggestPlan();
     }
-  }, [appState, approvedCourses, coursesPerPeriod]);
+  }, [appState, approvedCourses, coursesPerPeriod, years]);
 
   if (appState === 'login') {
     return (
@@ -438,15 +466,51 @@ export default function Home() {
               </div>
               <div className="login-input-group">
                 <label htmlFor="reg-password">Contraseña</label>
-                <input
-                  id="reg-password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                <div className="password-input-wrapper">
+                  <input
+                    id="reg-password"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="login-input"
+                    placeholder="Mínimo 4 caracteres"
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="password-toggle-btn"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  >
+                    {showPassword ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/>
+                        <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/>
+                        <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/>
+                        <line x1="2" y1="2" x2="22" y2="22"/>
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+              <div className="login-input-group">
+                <label htmlFor="reg-career-id">Carrera</label>
+                <select
+                  id="reg-career-id"
+                  value={regCareerId}
+                  onChange={(e) => setRegCareerId(e.target.value)}
                   className="login-input"
-                  placeholder="Mínimo 4 caracteres"
-                  required
-                />
+                  style={{ backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}
+                >
+                  {Object.entries(CAREERS).map(([id, career]) => (
+                    <option key={id} value={id}>{career.name}</option>
+                  ))}
+                </select>
               </div>
               {loginError && <div className="login-error">{loginError}</div>}
               <button type="submit" className="login-button">Registrarme</button>
@@ -930,6 +994,7 @@ export default function Home() {
               Plan Sugerido para Completar la Carrera
             </h2>
             <p>Basado en llevar {coursesPerPeriod} clases por período, podrías completar tu carrera en <strong>{completionYear}</strong> durante el período <strong>{completionPeriod}</strong>.</p>
+            
             <div className="suggested-plan-list">
               {suggestedPlan.map((period, index) => (
                 <div key={index} className="suggested-period">

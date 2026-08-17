@@ -14,11 +14,18 @@ const db = new Database(dbPath);
 
 // Inicializar tablas
 db.exec(`
+  CREATE TABLE IF NOT EXISTS careers (
+    id TEXT PRIMARY KEY,
+    name TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     password TEXT,
     is_new_user BOOLEAN DEFAULT 1,
-    manual_selection_completed BOOLEAN DEFAULT 0
+    manual_selection_completed BOOLEAN DEFAULT 0,
+    career_id TEXT,
+    FOREIGN KEY (career_id) REFERENCES careers(id)
   );
  
   CREATE TABLE IF NOT EXISTS course_status (
@@ -31,18 +38,21 @@ db.exec(`
   );
  
   CREATE TABLE IF NOT EXISTS years (
-    year INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    career_id TEXT,
+    year_number INTEGER,
     name TEXT,
-    color TEXT
+    color TEXT,
+    FOREIGN KEY (career_id) REFERENCES careers(id)
   );
  
   CREATE TABLE IF NOT EXISTS periods (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    year INTEGER,
+    year_id INTEGER,
     p INTEGER,
     label TEXT,
     ca INTEGER,
-    FOREIGN KEY (year) REFERENCES years(year)
+    FOREIGN KEY (year_id) REFERENCES years(id)
   );
  
   CREATE TABLE IF NOT EXISTS courses (
@@ -54,11 +64,12 @@ db.exec(`
   );
  
   CREATE TABLE IF NOT EXISTS course_period (
-    course_code TEXT PRIMARY KEY,
-    year INTEGER,
+    course_code TEXT,
+    year_id INTEGER,
     period INTEGER,
+    PRIMARY KEY (course_code, year_id, period),
     FOREIGN KEY (course_code) REFERENCES courses(code),
-    FOREIGN KEY (year) REFERENCES years(year)
+    FOREIGN KEY (year_id) REFERENCES years(id)
   );
  
   CREATE TABLE IF NOT EXISTS prerequisites (

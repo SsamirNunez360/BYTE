@@ -64,27 +64,22 @@ export default function LearningPathView({
   approvedCourses,
   years
 }: LearningPathViewProps) {
-  const allPendingCourses = useMemo(() => {
-    const pending: Array<{ code: string; name: string }> = [];
-    years.forEach(year =>
-      year.periods.forEach(period =>
-        period.courses.forEach(course => {
-          if (course.status === 'pending' && !approvedCourses.has(course.code)) {
-            pending.push({ code: course.code, name: course.name });
-          }
-        })
-      )
-    );
-    return pending;
-  }, [approvedCourses, years]);
+  
+  // Obtenemos todas las clases para el selector
+  const allCareerCourses = useMemo(() => {
+    return years.flatMap(y => y.periods.flatMap(p => p.courses));
+  }, [years]);
 
+  // Al pasar un Set vacío, forzamos a que el algoritmo devuelva TODO el árbol 
+  // de dependencias de la clase objetivo, desde el primer año, ignorando las que 
+  // ya están aprobadas. Así la ruta abarca "todas las clases" para llegar al objetivo.
   const phasedPath = useMemo(
-    () => getPhasedLearningPath(selectedCourse, approvedCourses),
-    [selectedCourse, approvedCourses]
+    () => getPhasedLearningPath(selectedCourse, new Set(), allCareerCourses),
+    [selectedCourse, allCareerCourses]
   );
 
-  const targetCourse = COURSE_GRAPH.get(selectedCourse);
-  const totalPending = phasedPath.reduce((acc, phase) => acc + phase.length, 0);
+  const targetCourse = COURSE_GRAPH.get(selectedCourse) || allCareerCourses.find(c => c.code === selectedCourse);
+  const totalCourses = phasedPath.reduce((acc, phase) => acc + phase.length, 0);
 
   return (
     <div className="learning-path-container">
@@ -92,11 +87,11 @@ export default function LearningPathView({
       <div className="glass-header">
         <div className="glass-header-content">
           <h3 className="glass-title">Explorador de Ruta Académica</h3>
-          <p className="glass-subtitle">Visualiza los grupos de materias por fases de cumplimiento.</p>
+          <p className="glass-subtitle">Visualiza la ruta completa de materias desde el inicio de la carrera hasta llegar a tu clase objetivo.</p>
           
           <div className="course-selector-wrapper">
             <label htmlFor="path-course-select" className="selector-label">
-              Curso Objetivo:
+              Ruta hacia la clase:
             </label>
             <div className="select-container">
               <select
@@ -105,7 +100,7 @@ export default function LearningPathView({
                 onChange={e => setSelectedCourse(e.target.value)}
                 className="glass-select"
               >
-                {allPendingCourses.map(course => (
+                {allCareerCourses.map(course => (
                   <option key={course.code} value={course.code}>
                     {course.code} - {course.name}
                   </option>
@@ -123,14 +118,14 @@ export default function LearningPathView({
             color="var(--unah-blue)"
           />
           <StatPill
-            label="Materias"
-            value={totalPending}
+            label="Total Clases"
+            value={totalCourses}
             color="var(--unah-gold)"
           />
-          {targetCourse && (
+          {targetCourse && 'difficulty' in targetCourse && (
             <StatPill
               label="Dificultad"
-              value={targetCourse.difficulty}
+              value={targetCourse.difficulty as string}
               color="var(--status-current)"
             />
           )}
@@ -138,74 +133,72 @@ export default function LearningPathView({
       </div>
 
       {/* Phased Content */}
-      {phasedPath.length === 0 ? (
-        <div className="glass-empty-state">
-          <div className="empty-icon">✨</div>
-          <h4>¡Ruta Completada!</h4>
-          <p>Ya cumples con todos los requisitos para matricular <strong>{selectedCourse}</strong>.</p>
-        </div>
-      ) : (
-        <div className="phased-roadmap" style={{ position: 'relative' }}>
-          {phasedPath.map((phase, phaseIndex) => {
-            const colors = ['#0066CC', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#EC4899'];
-            const phaseColor = colors[phaseIndex % colors.length];
+      <div className="phased-roadmap" style={{ position: 'relative' }}>
+        {phasedPath.map((phase, phaseIndex) => {
+          const colors = ['#0066CC', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#EC4899'];
+          const phaseColor = colors[phaseIndex % colors.length];
 
-            return (
-              <div key={phaseIndex} className="phase-row" style={{ '--phase-color': phaseColor } as any}>
-                <div className="phase-indicator">
-                  <div className="phase-number" style={{ color: phaseColor }}>{phaseIndex + 1}</div>
-                  <div className="phase-label">Fase</div>
-                </div>
+          return (
+            <div key={phaseIndex} className="phase-row" style={{ '--phase-color': phaseColor } as any}>
+              <div className="phase-indicator">
+                <div className="phase-number" style={{ color: phaseColor }}>{phaseIndex + 1}</div>
+                <div className="phase-label">Fase</div>
+              </div>
 
-                <div className="phase-courses">
-                  {phase.map((code) => {
-                    const node = COURSE_GRAPH.get(code);
-                    const isTarget = code === selectedCourse;
-                    
-                    return (
-                      <div 
-                        key={code} 
-                        id={`course-${code}`}
-                        className={`glass-course-card ${isTarget ? 'target' : ''}`}
-                      >
-                        <div className="card-glass-glow" />
-                        <div className="course-header">
-                          <span className="course-code" style={{ color: phaseColor }}>{code}</span>
-                          {node && (
-                            <span className={`difficulty-dot ${node.difficulty}`} title={node.difficulty} />
-                          )}
-                        </div>
-                        <div className="course-name">{node?.name ?? code}</div>
-                        
-                        {node && node.prerequisites.length > 0 && (
-                          <div className="course-deps">
-                            <span className="dep-label">Requisito:</span>
-                            <div className="dep-list-detailed">
-                              {node.prerequisites.map(p => {
-                                const pNode = COURSE_GRAPH.get(p);
-                                return (
-                                  <div key={p} className={`dep-item-detailed ${approvedCourses.has(p) ? 'approved' : ''}`}>
-                                    <span className="p-code">{p}</span>
-                                    <span className="p-name">{pNode?.name ?? ''}</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
+              <div className="phase-courses">
+                {phase.map((code) => {
+                  const node = COURSE_GRAPH.get(code) || allCareerCourses.find(c=>c.code===code);
+                  const isApproved = approvedCourses.has(code);
+                  const isTarget = code === selectedCourse;
+                  
+                  return (
+                    <div 
+                      key={code} 
+                      id={`course-${code}`}
+                      className={`glass-course-card ${isApproved ? 'approved' : ''} ${isTarget ? 'target' : ''}`}
+                      style={{ opacity: isApproved ? 0.75 : 1 }}
+                    >
+                      <div className="card-glass-glow" />
+                      <div className="course-header">
+                        <span className="course-code" style={{ color: phaseColor }}>{code}</span>
+                        {node && 'difficulty' in node && (
+                          <span className={`difficulty-dot ${node.difficulty}`} title={node.difficulty as string} />
                         )}
                       </div>
-                    );
-                  })}
-                </div>
-                
-                {phaseIndex < phasedPath.length - 1 && (
-                  <div className="phase-divider" style={{ background: phaseColor }} />
-                )}
+                      <div className="course-name">{node?.name ?? code}</div>
+                      
+                      {node && node.prerequisites && node.prerequisites.length > 0 && (
+                        <div className="course-deps">
+                          <span className="dep-label">Requisito:</span>
+                          <div className="dep-list-detailed">
+                            {node.prerequisites.map(p => {
+                              const pNode = COURSE_GRAPH.get(p) || allCareerCourses.find(c=>c.code===p);
+                              return (
+                                <div key={p} className={`dep-item-detailed ${approvedCourses.has(p) ? 'approved' : ''}`}>
+                                  <span className="p-code">{p}</span>
+                                  <span className="p-name">{pNode?.name ?? ''}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {isApproved && (
+                        <div className="approved-badge">Aprobada</div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
-      )}
+              
+              {phaseIndex < phasedPath.length - 1 && (
+                <div className="phase-divider" style={{ background: phaseColor }} />
+              )}
+            </div>
+          );
+        })}
+      </div>
 
       <style jsx>{`
         .learning-path-container {
@@ -719,6 +712,25 @@ export default function LearningPathView({
           font-size: 28px;
           color: var(--status-approved);
           margin-bottom: 12px;
+        }
+
+        .glass-course-card.approved {
+          border-color: var(--status-approved);
+        }
+
+        .approved-badge {
+          position: absolute;
+          top: 12px;
+          right: 12px;
+          background: var(--status-approved);
+          color: white;
+          padding: 4px 8px;
+          border-radius: 6px;
+          font-size: 10px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
         @keyframes fadeInUp {

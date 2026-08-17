@@ -47,14 +47,21 @@ export default function RecommendationEngine({
     return pending;
   }, [approvedCourses, years]);
 
+  // Obtener todas las clases del plan para el selector
+  const allCareerCourses = useMemo(() => {
+    return years.flatMap(y => y.periods.flatMap(p => p.courses));
+  }, [years]);
+
   const selectedCourseValue = useMemo(() => {
-    const availableCodes = new Set(allPendingCourses.map(course => course.code));
+    const availableCodes = new Set(allCareerCourses.map(course => course.code));
     if (availableCodes.has(selectedCourse)) {
       return selectedCourse;
     }
 
-    return suggestedPlan[0]?.courses[0]?.code ?? allPendingCourses[0]?.code ?? 'IE-326';
-  }, [allPendingCourses, selectedCourse, suggestedPlan]);
+    // Por defecto, intentar mostrar la última clase (e.g. PPS) para que abarque toda la ruta
+    const ppsCourse = allCareerCourses.find(c => c.code === 'PPS');
+    return ppsCourse?.code ?? allCareerCourses[allCareerCourses.length - 1]?.code ?? 'IE-326';
+  }, [allCareerCourses, selectedCourse]);
 
   const nextSuggestedPeriod = suggestedPlan[0] ?? null;
 
@@ -67,25 +74,26 @@ export default function RecommendationEngine({
   const recommendations = useMemo(() => {
     if (nextSuggestedPeriod) {
       return nextSuggestedPeriod.courses.map((course, index) => {
-        const validation = validatePrerequisites(course.code, projectedCompletedCourses);
+        const validation = validatePrerequisites(course.code, projectedCompletedCourses, allCareerCourses);
         const graphCourse = COURSE_GRAPH.get(course.code);
+        const difficulty = graphCourse?.difficulty || 'intermedio';
 
         return {
           courseCode: course.code,
           courseName: course.name,
           canTake: validation.canTake,
           reason: validation.canTake
-            ? `Sugerida para ${nextSuggestedPeriod.period} según tu plan proyectado.`
-            : `Aparece en ${nextSuggestedPeriod.period}, pero aún faltan prerequisitos para llegar a ella.`,
-          missingPrerequisites: validation.missingPrerequisites.map(item => item.code),
-          difficulty: graphCourse?.difficulty ?? 'intermedio',
-          recommendationScore: Math.max(100 - index * 8, 70),
+            ? 'Incluida en tu plan sugerido para el próximo período.'
+            : `Faltan prerequisitos: ${validation.missingPrerequisites.map(p => p.name).join(', ')}`,
+          missingPrerequisites: validation.missingPrerequisites.map(p => p.code),
+          difficulty,
+          recommendationScore: validation.canTake ? 100 : 0
         };
       });
     }
 
-    return getRecommendations(approvedCourses, currentCourses, allPendingCourses);
-  }, [approvedCourses, allPendingCourses, currentCourses, nextSuggestedPeriod, projectedCompletedCourses]);
+    return getRecommendations(approvedCourses, currentCourses, allPendingCourses, allCareerCourses);
+  }, [approvedCourses, allPendingCourses, currentCourses, nextSuggestedPeriod, projectedCompletedCourses, allCareerCourses]);
 
   return (
     <div className="recommendation-engine-glass">

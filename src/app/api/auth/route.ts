@@ -4,7 +4,7 @@ import db from '@/lib/db';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { action, userId, password } = body;
+    const { action, userId, password, careerId } = body;
 
     if (action === 'login') {
       const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any;
@@ -15,7 +15,8 @@ export async function POST(request: Request) {
           user: {
             id: user.id,
             isNewUser: !!user.is_new_user,
-            manualSelectionCompleted: !!user.manual_selection_completed
+            manualSelectionCompleted: !!user.manual_selection_completed,
+            careerId: user.career_id
           }
         });
       }
@@ -28,8 +29,12 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'El usuario ya existe' }, { status: 400 });
       }
 
-      db.prepare('INSERT INTO users (id, password, is_new_user, manual_selection_completed) VALUES (?, ?, 1, 0)')
-        .run(userId, password);
+      if (!careerId) {
+        return NextResponse.json({ error: 'Debe seleccionar una carrera' }, { status: 400 });
+      }
+
+      db.prepare('INSERT INTO users (id, password, is_new_user, manual_selection_completed, career_id) VALUES (?, ?, 1, 0, ?)')
+        .run(userId, password, careerId);
 
       return NextResponse.json({ success: true });
     }

@@ -375,12 +375,34 @@ export interface Recommendation {
   recommendationScore: number; // 0-100
 }
 
-function countUnlockedCourses(courseCode: string): number {
-  let unlocked = 0;
+function getCourseNode(code: string, allCareerCourses?: Array<{ code: string, name: string, prerequisites: string[] }>): CourseNode | undefined {
+  if (COURSE_GRAPH.has(code)) {
+    return COURSE_GRAPH.get(code);
+  }
+  if (allCareerCourses) {
+    const c = allCareerCourses.find(x => x.code === code);
+    if (c) {
+      return {
+        code: c.code,
+        name: c.name,
+        prerequisites: c.prerequisites,
+        difficulty: 'intermedio'
+      };
+    }
+  }
+  return undefined;
+}
 
-  for (const course of COURSE_GRAPH.values()) {
-    if (course.prerequisites.includes(courseCode)) {
-      unlocked++;
+function countUnlockedCourses(courseCode: string, allCareerCourses?: Array<{ code: string, name: string, prerequisites: string[] }>): number {
+  let unlocked = 0;
+  
+  if (allCareerCourses) {
+    for (const course of allCareerCourses) {
+      if (course.prerequisites.includes(courseCode)) unlocked++;
+    }
+  } else {
+    for (const course of COURSE_GRAPH.values()) {
+      if (course.prerequisites.includes(courseCode)) unlocked++;
     }
   }
 
@@ -408,9 +430,10 @@ function getDifficultyBonus(difficulty: CourseNode['difficulty']): number {
  */
 export function validatePrerequisites(
   courseCode: string,
-  approvedCourses: Set<string>
+  approvedCourses: Set<string>,
+  allCareerCourses?: Array<{ code: string, name: string, prerequisites: string[] }>
 ): PrerequisiteCheckResult {
-  const course = COURSE_GRAPH.get(courseCode);
+  const course = getCourseNode(courseCode, allCareerCourses);
 
   if (!course) {
     return {
@@ -426,7 +449,7 @@ export function validatePrerequisites(
   const satisfied: CourseNode[] = [];
 
   for (const prereqCode of course.prerequisites) {
-    const prereqCourse = COURSE_GRAPH.get(prereqCode);
+    const prereqCourse = getCourseNode(prereqCode, allCareerCourses);
     if (prereqCourse) {
       if (approvedCourses.has(prereqCode)) {
         satisfied.push(prereqCourse);
@@ -447,15 +470,12 @@ export function validatePrerequisites(
 
 /**
  * Obtiene recomendaciones de cursos para el siguiente período
- * @param approvedCourses - Cursos aprobados
- * @param currentCourses - Cursos en curso
- * @param pendingCourses - Todos los cursos pendientes
- * @returns Array de recomendaciones ordenadas por score
  */
 export function getRecommendations(
   approvedCourses: Set<string>,
   currentCourses: Set<string>,
-  pendingCourses: Array<{ code: string; name: string }>
+  pendingCourses: Array<{ code: string; name: string, prerequisites: string[] }>,
+  allCareerCourses?: Array<{ code: string, name: string, prerequisites: string[] }>
 ): Recommendation[] {
   const recommendations: Recommendation[] = [];
 
@@ -466,15 +486,16 @@ export function getRecommendations(
 
     const validation = validatePrerequisites(
       pendingCourse.code,
-      approvedCourses
+      approvedCourses,
+      allCareerCourses
     );
 
-    const course = COURSE_GRAPH.get(pendingCourse.code);
+    const course = getCourseNode(pendingCourse.code, allCareerCourses);
     if (!course) continue;
 
     let recommendationScore = 0;
     let reason = '';
-    const unlockedCourses = countUnlockedCourses(pendingCourse.code);
+    const unlockedCourses = countUnlockedCourses(pendingCourse.code, allCareerCourses);
 
     if (validation.canTake) {
       recommendationScore = Math.min(
@@ -517,55 +538,14 @@ export function getRecommendations(
 }
 
 /**
- * Obtiene la ruta de aprendizaje (camino más corto) para un curso objetivo
- * @param targetCode - Código del curso objetivo
- * @param approvedCourses - Cursos aprobados
- * @returns Array de cursos que se deben completar
- */
-export function getLearningPath(
-  targetCode: string,
-  approvedCourses: Set<string>
-): string[] {
-  const course = COURSE_GRAPH.get(targetCode);
-  if (!course) return [];
-
-  const path: string[] = [];
-  const visited = new Set<string>();
-
-  function dfs(code: string) {
-    if (visited.has(code) || approvedCourses.has(code)) {
-      return;
-    }
-
-    visited.add(code);
-    const currentCourse = COURSE_GRAPH.get(code);
-
-    if (currentCourse) {
-      for (const prereq of currentCourse.prerequisites) {
-        if (!approvedCourses.has(prereq)) {
-          dfs(prereq);
-        }
-      }
-    }
-
-    path.push(code);
-  }
-
-  dfs(targetCode);
-  return path;
-}
-
-/**
  * Obtiene la ruta de aprendizaje estructurada por fases (niveles de profundidad)
- * @param targetCode - Código del curso objetivo
- * @param approvedCourses - Cursos aprobados
- * @returns Array de fases, cada una con un array de cursos que se pueden llevar en paralelo
  */
 export function getPhasedLearningPath(
   targetCode: string,
-  approvedCourses: Set<string>
+  approvedCourses: Set<string>,
+  allCareerCourses?: Array<{ code: string, name: string, prerequisites: string[] }>
 ): string[][] {
-  const targetCourse = COURSE_GRAPH.get(targetCode);
+  const targetCourse = getCourseNode(targetCode, allCareerCourses);
   if (!targetCourse) return [];
 
   // 1. Obtener todos los cursos necesarios (recursivo) que NO están aprobados
@@ -576,7 +556,7 @@ export function getPhasedLearningPath(
     if (visited.has(code)) return;
     visited.add(code);
 
-    const course = COURSE_GRAPH.get(code);
+    const course = getCourseNode(code, allCareerCourses);
     if (!course) return;
 
     for (const prereq of course.prerequisites) {
@@ -592,7 +572,6 @@ export function getPhasedLearningPath(
     required.add(targetCode);
     collect(targetCode);
   } else {
-    // Si ya está aprobado, no hay ruta pendiente
     return [];
   }
 
@@ -604,7 +583,7 @@ export function getPhasedLearningPath(
     const currentPhase: string[] = [];
     
     for (const code of remaining) {
-      const course = COURSE_GRAPH.get(code)!;
+      const course = getCourseNode(code, allCareerCourses)!;
       // Un curso va en esta fase si todos sus prerequisitos requeridos 
       // ya fueron colocados en fases anteriores o ya están aprobados.
       const allPrereqsSatisfied = course.prerequisites.every(
@@ -617,7 +596,6 @@ export function getPhasedLearningPath(
     }
 
     if (currentPhase.length === 0) {
-      // Evitar bucle infinito si hay dependencias circulares (no debería haber en un plan de estudios)
       break;
     }
 
